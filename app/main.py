@@ -35,6 +35,7 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        "https://helpdesk-ai-ten.vercel.app",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
