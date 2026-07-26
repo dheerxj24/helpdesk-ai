@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # IT Helpdesk Auto-Resolver
 
 ## What's built so far (steps 1-6 complete)
@@ -76,3 +77,7 @@ requirements.txt
   in the dozens/hundreds (no need for IVF/HNSW at this scale).
 - **resolution_logs table exists from day 1** -- audit trail is a design
   decision, not bolted on after the fact.
+=======
+# helpdesk-ai
+Helpdesk 
+>>>>>>> 280416e4d75ec04b6065ba0c6e506d51db476dc6
