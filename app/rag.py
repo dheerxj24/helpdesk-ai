@@ -2,52 +2,84 @@
 RAG retrieval layer.
 
 Design notes (for interview explanation):
-- We use sentence-transformers (all-MiniLM-L6-v2) for embeddings -- it's small
-  (~80MB), runs locally/free, and is good enough for short IT-ticket-style text.
-  No need for a heavier/paid embedding API at this scale.
-- FAISS (IndexFlatL2) is used for similarity search. For our KB size (dozens to
-  low-hundreds of articles) an exact flat index is fine -- no need for
-  approximate-nearest-neighbor indexes (IVF, HNSW) which only pay off at
-  much larger scale. This is a good "right-sized, not over-engineered" point
-  to make in an interview.
-- The FAISS index lives in memory and is rebuilt from the DB on startup. For a
-  demo/project this is fine. In a "real" production system you'd persist the
-  index to disk and update it incrementally instead of rebuilding from scratch
-  every time -- worth mentioning if asked "how would you scale this".
+- Embeddings come from Cohere's hosted Embed API (embed-english-v3.0) instead
+  of a locally-loaded sentence-transformers model. This was a deliberate
+  change from the original design: local embeddings meant importing
+  torch + sentence-transformers, which alone is enough RAM to OOM a 512MB
+  Render free-tier instance during startup/import -- before the app could
+  even bind its port. Calling a hosted embeddings API removes that entire
+  dependency chain, at the cost of a network round-trip per embed call and
+  a dependency on Cohere's free tier being available.
+- FAISS (IndexFlatIP) is still used for the actual similarity search --
+  it's a lightweight, torch-free C++ library, so keeping it in-process is
+  fine. Only the embedding STEP moved to a hosted API, not the index/search.
+- Cohere's v3 embed models require an `input_type` ("search_document" for
+  things being indexed, "search_query" for the incoming search text) --
+  this asymmetric embedding is actually a quality improvement over the old
+  symmetric sentence-transformers setup, worth mentioning if asked.
+- The FAISS index lives in memory and is rebuilt from the DB on app startup
+  (see main.py on_startup) and whenever a KB article is added.
 """
 
+import os
 import numpy as np
+import requests
 from sqlalchemy.orm import Session
 
 from app import models
 
-_model = None
+COHERE_API_KEY = os.environ.get("COHERE_API_KEY")
+COHERE_EMBED_URL = "https://api.cohere.com/v1/embed"
+COHERE_MODEL = "embed-english-v3.0"
+
 _index = None
 _article_ids = []  # maps FAISS row position -> KBArticle.id
 
 
-def get_model():
+def _get_embeddings(texts: list[str], input_type: str) -> np.ndarray:
     """
-    Lazy-load the embedding model (loading it is slow, do it once).
+    Calls Cohere's Embed API for a batch of texts and returns L2-normalized
+    float32 vectors (normalized so FAISS IndexFlatIP == cosine similarity,
+    matching the old sentence-transformers normalize_embeddings=True setup).
+    """
+    if not COHERE_API_KEY:
+        raise RuntimeError(
+            "COHERE_API_KEY is not set. Get a free key at "
+            "dashboard.cohere.com/api-keys and set it as an env var."
+        )
 
-    IMPORTANT: sentence_transformers is imported HERE, not at module top
-    level. sentence-transformers pulls in torch/transformers/huggingface_hub,
-    which is enough RAM/time on Render's free 512MB tier to OOM or hang the
-    process during import -- before uvicorn even binds the port. Keeping the
-    import inside this function means it only happens on first actual use
-    (first ticket classified / KB search), not at app startup.
-    """
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _model
+    response = requests.post(
+        COHERE_EMBED_URL,
+        headers={
+            "Authorization": f"Bearer {COHERE_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": COHERE_MODEL,
+            "texts": texts,
+            "input_type": input_type,
+            "embedding_types": ["float"],
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    # v1 embed responses: either {"embeddings": [[...], ...]} or, with
+    # embedding_types set, {"embeddings": {"float": [[...], ...]}}
+    embeddings = data["embeddings"]
+    if isinstance(embeddings, dict):
+        embeddings = embeddings["float"]
+
+    vecs = np.array(embeddings, dtype="float32")
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0  # avoid divide-by-zero on a degenerate embedding
+    return vecs / norms
 
 
 def embed_text(text: str) -> np.ndarray:
-    model = get_model()
-    vec = model.encode([text], convert_to_numpy=True, normalize_embeddings=True)
-    return vec.astype("float32")
+    """Embed a single QUERY string (used at search time)."""
+    return _get_embeddings([text], input_type="search_query")
 
 
 def build_index(db: Session):
@@ -66,12 +98,10 @@ def build_index(db: Session):
         _article_ids = []
         return
 
-    model = get_model()
     # embed title + content together -- title carries a lot of signal for
     # short IT tickets ("VPN Not Connecting" alone is often enough to match)
     texts = [f"{a.title}. {a.content}" for a in articles]
-    embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
-    embeddings = embeddings.astype("float32")
+    embeddings = _get_embeddings(texts, input_type="search_document")
 
     dim = embeddings.shape[1]
     index = faiss.IndexFlatIP(dim)  # inner product on normalized vectors = cosine similarity

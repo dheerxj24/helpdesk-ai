@@ -1,12 +1,9 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 sqlalchemy>=2.0.35
-torch==2.13.0+cpu
-sentence-transformers>=3.2.0
 faiss-cpu>=1.9.0
 openai>=1.50.0
 pydantic>=2.9.2
 python-dotenv>=1.0.1
 psycopg2-binary
+requests>=2.32.0
