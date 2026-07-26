@@ -45,6 +45,15 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    # The FAISS index lives only in process memory (see rag.py) -- it does
+    # NOT persist across restarts. Without rebuilding it here, a restarted
+    # process would have KB articles in Postgres but an empty in-memory
+    # index, so every search() call returns [] and confidence is always 0.0.
+    db = SessionLocal()
+    try:
+        rag.build_index(db)
+    finally:
+        db.close()
 
 
 # ---------- Pydantic schemas (request/response shapes) ----------
