@@ -45,13 +45,6 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
-    # Build the FAISS index from whatever KB articles already exist in the DB.
-    # Needs its own short-lived session since this runs outside a request.
-    db = SessionLocal()
-    try:
-        rag.build_index(db)
-    finally:
-        db.close()
 
 
 # ---------- Pydantic schemas (request/response shapes) ----------
