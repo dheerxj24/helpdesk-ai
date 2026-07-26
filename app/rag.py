@@ -16,9 +16,7 @@ Design notes (for interview explanation):
   every time -- worth mentioning if asked "how would you scale this".
 """
 
-import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from sqlalchemy.orm import Session
 
 from app import models
@@ -29,9 +27,19 @@ _article_ids = []  # maps FAISS row position -> KBArticle.id
 
 
 def get_model():
-    """Lazy-load the embedding model (loading it is slow, do it once)."""
+    """
+    Lazy-load the embedding model (loading it is slow, do it once).
+
+    IMPORTANT: sentence_transformers is imported HERE, not at module top
+    level. sentence-transformers pulls in torch/transformers/huggingface_hub,
+    which is enough RAM/time on Render's free 512MB tier to OOM or hang the
+    process during import -- before uvicorn even binds the port. Keeping the
+    import inside this function means it only happens on first actual use
+    (first ticket classified / KB search), not at app startup.
+    """
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
@@ -48,6 +56,8 @@ def build_index(db: Session):
     Call this on app startup, and again any time a KB article is added
     (see main.py -- create_kb_article calls this after inserting).
     """
+    import faiss
+
     global _index, _article_ids
 
     articles = db.query(models.KBArticle).all()
