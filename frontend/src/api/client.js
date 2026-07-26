@@ -1,15 +1,15 @@
 // Central fetch wrapper for the FastAPI backend.
 //
-// IMPORTANT: The backend at http://127.0.0.1:8000 does not currently have
-// CORS configured. If you see a browser console error like:
-//   "Access to fetch at 'http://127.0.0.1:8000/...' from origin
-//   'http://localhost:5173' has been blocked by CORS policy"
-// that is NOT a frontend bug. The backend needs a CORSMiddleware added
-// (in app/main.py) allowing the Vite dev origin. This app deliberately does
-// not attempt any workaround (no proxy hacks) since the backend is out of
-// scope for this change -- flag it and fix it on the backend instead.
+// API_BASE_URL comes from the VITE_API_URL environment variable (set in
+// Vercel: Settings -> Environment Variables -> VITE_API_URL, applied to
+// Production + Preview). Falls back to the local FastAPI dev server so
+// `npm run dev` still works out of the box without a .env file.
+//
+// Vite only exposes env vars prefixed with VITE_ to client code, and only
+// bakes them in at BUILD time -- changing the var in Vercel requires a
+// redeploy (not just a page refresh) to take effect.
 
-export const API_BASE_URL = 'http://127.0.0.1:8000'
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 
 export class ApiError extends Error {
   constructor(message, status) {
