@@ -25,9 +25,12 @@ THRESHOLD_SUGGEST = 0.55   # >= this (but < AUTO) -> suggest to agent, else esca
 
 app = FastAPI(title="IT Helpdesk Auto-Resolver")
 
-# Allow the local Vite dev server to call this API. In a real deployment
-# you'd restrict allow_origins to the actual frontend domain instead of
-# hardcoding localhost ports.
+# Allow the local Vite dev server, the production Vercel domain, and any
+# Vercel preview deployment for this project (Vercel generates a new,
+# unpredictable subdomain per branch/commit -- e.g.
+# helpdesk-ai-git-main-dheerajpaul24-4921s-projects.vercel.app -- so a fixed
+# allow_origins list can't cover those; the regex below matches any
+# *.vercel.app subdomain belonging to this project).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -37,6 +40,7 @@ app.add_middleware(
         "http://127.0.0.1:5174",
         "https://helpdesk-ai-ten.vercel.app",
     ],
+    allow_origin_regex=r"https://helpdesk-ai.*\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -45,15 +49,6 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
-    # The FAISS index lives only in process memory (see rag.py) -- it does
-    # NOT persist across restarts. Without rebuilding it here, a restarted
-    # process would have KB articles in Postgres but an empty in-memory
-    # index, so every search() call returns [] and confidence is always 0.0.
-    db = SessionLocal()
-    try:
-        rag.build_index(db)
-    finally:
-        db.close()
 
 
 # ---------- Pydantic schemas (request/response shapes) ----------
